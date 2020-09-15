@@ -1,0 +1,58 @@
+---
+title: "Statistical Rethinking 2: Chapter 5"
+author: Wang Minjie
+---
+
+
+约定Stan模型m开头，brms模型以b开头
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE, 
+  message = FALSE, 
+  error = FALSE
+)
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(brms)
+library(tidybayes)
+library(rstan)
+library(patchwork)
+```
+
+# Section 5.1: 虚假关联
+
+
+WaffleHouses 是一种卖华夫饼的连锁店，类似肯德基
+```{r}
+d <- readr::read_csv(here::here("data", "WaffleDivorce.csv"))
+```
+
+`MedianAgeMarriage, Marriage, Divorce` 三列标准化
+```{r}
+d <- d %>%
+  mutate(
+    across(c(MedianAgeMarriage, Marriage, Divorce), ~ (.x - mean(.x)) / sd(.x))
+  )
+glimpse(d)
+```
+
+华夫饼屋与人口数量的比例，与当地离婚率的关联。通过图，我们看不出他们之间的关联
+```{r}
+library(ggrepel)
+d %>% 
+  ggplot(aes(x = WaffleHouses / Population, y = Divorce)) +
+  geom_point() +
+  geom_text_repel(data = d %>% filter(Loc %in% c("ME", "OK", "AR", "AL", "GA", "SC", "NJ")),  
+                  aes(label = Loc), 
+                  size = 3, seed = 1024) +
+  geom_smooth(method = "lm", level = 0.89, fullrange = T) +
+  scale_x_continuous(limits = c(0, 50)) +
+  labs(x = "Waffle Houses per million", y = "Divorce Rate")
+```
