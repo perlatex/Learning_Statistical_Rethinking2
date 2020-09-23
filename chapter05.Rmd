@@ -38,7 +38,7 @@ WaffleHouses
 d <- readr::read_csv(here::here("data", "WaffleDivorce.csv"))
 ```
 
-`MedianAgeMarriage, Marriage, Divorce` 三列标准化
+首先对 `MedianAgeMarriage, Marriage, Divorce` 三列标准化
 ```{r}
 d <- d %>%
   mutate(
@@ -67,15 +67,17 @@ d %>%
   )
 ```
 
-很显然，这是一种虚假的关联。因为常理下不太可能吃饼会导致婚姻危机。但是我们可能会想，是哪个（哪些）变量导致了虚假关联？ 事实上，华夫饼屋1955年在南美地区兴起发展的，但离婚任何地方都有只是南美地区离婚率较高，很可能是某个原因让这两件事情同时发生了。
+常理下不太可能吃饼会导致婚姻危机。显然，这是一种虚假的关联。但是我们可能会想，是哪个（哪些）变量导致了虚假关联？ 事实上，华夫饼屋1955年在南美地区兴起发展的，而离婚任何地方都有发生，只是南美地区离婚率较高，很可能是某个原因让这两件事情同时发生了。
 
-这称之为关联事件，但彼此不构成因果关系。**关联不等于因果**
+饼屋和离婚率，这称之为关联事件，但彼此不构成因果关系。**关联不等于因果**。
+
 
 一般情况下，会做多元回归模型，原因如下：
 
 - 减少混淆，这里饼屋与离婚率就是一种混淆，它会隐藏真正重要的原因
 - 可能是多个或者复杂的原因。一个现象可能是多个原因同时引起，所以需要把多个因素放在一起同时测量
 - 交互作用。一个变量要依赖另一个变量起作用，比如植物生成需要光和水，只有光不行，只有水也不行。
+
 
 下面通过最简单的线性回归模型揭示：
 - 饼屋与离婚率之间的虚假关联
@@ -84,6 +86,8 @@ d %>%
 
 # Section 5.1: 虚假关联
 
+
+## 结婚率和离婚率
 先把饼屋的事情放一边，我们先看看结婚率和离婚率之间的关联。
 
 ### stan code 
@@ -129,7 +133,79 @@ m5.1 <- stan(model_code = stan_program, data = stan_data)
 ```
 
 
+
+模型结果，显示系数为`b[2]`为 0.35
+```{r}
+m5.1 %>% summary()
+
+m5.1 %>%
+  rstan::extract(pars = c('b[1]', 'b[2]'))
+
+m5.1 %>%
+  rstan::extract(pars = c('b', 'mu'))
+```
+
+
+`rstan::extract()` 可以提取后验样本，但不是很好用，尤其是可视化的时候。我推荐`tidybayes::spread_draws`，如果是`brms`模型，可以使用更方便的`tidybayes::add_fitted_draws()` 或者`tidybayes::add_predicted_draws()`
+
+
+- 提取系数
+```{r}
+key <- c("1" = "intercept", "2" = "bM")
+m5.1 %>% 
+  tidybayes::spread_draws(b[i]) %>% 
+  ggdist::mean_qi(.width = c(0.95)) %>% 
+  mutate(i = recode(i, !!!key))
+```
+
+
+- 提取`mu`和`yhat`
+
+可以将讲`mu[i]` 和 `yhat[i]` 理解为 `fitted` 和 `predicted`
+
+```{r}
+post_draw <- m5.1 %>% 
+    tidybayes::spread_draws(mu[i], yhat[i]) 
+post_draw  
+```
+
+
+
+
+```{r}
+post_draw %>% 
+  mean_qi() %>% 
+  mutate(
+    Marriage = d$Marriage,
+    Divorce = d$Divorce
+    )
+```
+
+
+```{r, fig.width = 5, fig.height = 4.5, message = F}
+post_draw %>%
+  mean_qi() %>%
+  mutate(
+    Marriage = d$Marriage,
+    Divorce = d$Divorce
+  ) %>%
+  ggplot() +
+  geom_ribbon(aes(x = Marriage, ymin = mu.lower, ymax = mu.upper), alpha = 0.2) +
+  #geom_ribbon(aes(x = Marriage, ymin = yhat.lower, ymax = yhat.upper), alpha = 0.2, fill = "red") +
+  geom_line(aes(x = Marriage, y = mu)) +
+  geom_point(aes(x = Marriage, y = Divorce), 
+             shape = 1, size = 2, color = "dodgerblue4", alpha = 0.5) +
+  theme_classic() 
+```
+
+
+
+
+
+
 ### brms
+
+我们用brms，重新做一遍
 
 ```{r b5.1}
 b5.1 <-
@@ -150,15 +226,115 @@ b5.1 <-
 ```
 
 
+```{r, fig.width = 5, fig.height = 5, message = F}
+d %>% 
+  ggplot(aes(x = Marriage, y = Divorce)) +
+  geom_point(shape = 1, size = 2)
+```
+
+
+```{r}
+d %>% 
+  tidybayes::add_fitted_draws(model = b5.1, n = 1000) %>% 
+  ggplot(aes(x = Marriage, y = .value, group = .draw)) +
+  geom_line(alpha = 0.1)
+```
 
 
 
-我们看到，左边这个张图显示结婚率越高离婚率越高，那问题来了，是结婚导致离婚？
-只有结婚了才能离婚，因为不结婚就不存在离婚，但两者不存在因果关系。相反，高结婚率意味对价值观、婚姻观有较高的认同度，往往导致离婚率降低。
 
-右图给出的是**该地结婚年龄的中位数**与**离婚率**的关系，应该说这个结婚年龄是离婚率的很好的因素（结婚年龄越大，离婚率越低），但这个也说不通，
+```{r, fig.width = 5, fig.height = 4.5, message = F}
+d %>% 
+  tidybayes::add_fitted_draws(model = b5.1, n = 1000) %>% 
+  ggplot(aes(x = Marriage, y = Divorce)) +
+  stat_lineribbon(aes(y = .value), .width = .95) +              # fullrange = T?
+  geom_point(data = d, shape = 1, size = 2, color = "blue") +
+  theme_classic() +
+  scale_fill_manual(values = "grey") +
+  theme(legend.position = "none") +
+  labs(x = "Marriage rate", y = "Divorce rate")
+```
+
+
+我们看到，这个张图显示结婚率越高，离婚率就越高，那问题来了，是结婚导致离婚？
+只有结婚了才能离婚，因为不结婚就不存在离婚，但两者不存在因果关系。相反，高结婚率意味对价值观、婚姻观有较高的认同度，往往导致离婚率降低，而不应该是高。
+
+
+
+
+## 结婚年龄与离婚率
+
+```{r, warning=FALSE, message=FALSE}
+stan_program <- '
+data {
+  int<lower=1> n;            // number of observations
+  int<lower=1> K;            // number of regressors (including constant)
+  vector[n] Divorce;         // outcome
+  matrix[n, K] X;            // regressors
+}
+parameters {
+  real<lower=0,upper=50> sigma;    // scale
+  vector[K] b;                     // coefficients (including constant)
+}
+transformed parameters {
+  vector[n] mu;                    // location
+  mu = X * b;
+}
+model {
+  Divorce ~ normal(mu, sigma);    // probability model
+  sigma ~ exponential(1);         // prior for scale
+  b[1] ~ normal(0, 0.2);          // prior for intercept
+  for (i in 2:K) {                // priors for coefficients
+    b[i] ~ normal(0, 0.5);
+  }
+}
+generated quantities {
+  vector[n] yhat;                 // predicted outcome
+  for (i in 1:n) yhat[i] = normal_rng(mu[i], sigma);
+}
+'
+
+stan_data <- d %>%
+  tidybayes::compose_data(
+    K = 2,
+    y = Divorce,
+    X = model.matrix(~MedianAgeMarriage, .)
+  )
+
+m5.2 <- stan(model_code = stan_program, data = stan_data)
+```
+
+
+
+
+画图书中右边的图
+
+```{r, fig.width = 5, fig.height = 4.5, message = F}
+post_draw <- m5.2 %>% 
+    tidybayes::spread_draws(mu[i], yhat[i]) 
+
+post_draw %>%
+  mean_qi() %>%
+  mutate(
+    MedianAgeMarriage = d$MedianAgeMarriage,
+    Divorce = d$Divorce
+  ) %>%
+  ggplot() +
+  geom_ribbon(aes(x = MedianAgeMarriage, ymin = mu.lower, ymax = mu.upper), alpha = 0.2) +
+  #geom_ribbon(aes(x = MedianAgeMarriage, ymin = yhat.lower, ymax = yhat.upper), alpha = 0.2, fill = "red") +
+  geom_line(aes(x = MedianAgeMarriage, y = mu)) +
+  geom_point(aes(x = MedianAgeMarriage, y = Divorce), 
+             shape = 1, size = 2, color = "dodgerblue4", alpha = 0.5) +
+  theme_classic() 
+```
+
+
+该图给出的是**该地结婚年龄的中位数**与**离婚率**的关系，应该说这个结婚年龄是解释离婚率变化的很好的因素（结婚年龄越大，离婚率越低），但这个也说不通，
 除非结婚年龄很晚，在离婚之前就去世了。
 
+
+
+### 我还没弄明白的地方
 数据是做了标准化处理的，
 所以$\beta = 1$, 意味着1个标准差的年龄波动引起1个标准差输出结果的波动。
 
@@ -169,3 +345,6 @@ Normal(0, 0.5)  > 1 的概率是多大？
 ```
 
 书中给出结果是5%（我还需要再看）
+
+
+
